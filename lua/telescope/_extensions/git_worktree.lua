@@ -129,12 +129,30 @@ local create_worktree = function(opts)
                 return
             end
 
-            create_input_prompt(function(name)
-                if name == '' then
-                    name = branch
+            -- create_input_prompt(function(name)
+            --     if name == '' then
+            --         name = branch
+            --     end
+            --     git_worktree.create_worktree(name, branch)
+            -- end)
+
+            local function starts_with(str, start)
+                return string.sub(str, 1, string.len(start)) == start
+            end
+
+            local name = ''
+
+            if starts_with(branch, "feature") then
+                print("The string starts with 'feature'")
+                local function removePrefix(s, prefix)
+                    return string.gsub(s, "^" .. prefix, "")
                 end
-                git_worktree.create_worktree(name, branch)
-            end)
+                name =  "../wt-" .. removePrefix(branch, "feature/")
+            else
+                name =  "../wt-" .. branch
+            end
+
+            git_worktree.create_worktree(name, branch)
         end)
 
         return true
