@@ -11,38 +11,6 @@ local Config = require('git-worktree.config')
 
 local force_next_deletion = false
 
-M = {}
-
-M.has_worktrees = function(path_to_git_folder)
-    local is_bare = vim.fn.system('git rev-parse --is-bare-repository')
-    if is_bare ~= 'true\n' then
-        return false
-    end
-
-    local is_inside_work_tree = vim.fn.system('git rev-parse --is-inside-work-tree')
-    if is_inside_work_tree == 'true\n' then
-        return true
-    end
-
-    local git_dir = vim.fn.system('git rev-parse --git-dir')
-    local git_common_dir = vim.fn.system('git rev-parse --git-common-dir')
-
-    local is_root_dir = git_dir == git_common_dir
-
-    local git_worktree_path = path_to_git_folder .. '/worktrees'
-
-    local git_worktree_path_alt_location = path_to_git_folder .. '/.git/worktrees'
-
-    local exists_worktrees = vim.fn.isdirectory(git_worktree_path)
-    local exists_worktrees_alt_location = vim.fn.isdirectory(git_worktree_path_alt_location)
-
-    if is_root_dir and exists_worktrees == 0 and exists_worktrees_alt_location == 0 then
-        return false
-    end
-
-    return true
-end
-
 -- Get the path of the selected worktree
 -- @param prompt_bufnr number: the prompt buffer number
 -- @return string: the path of the selected worktree
@@ -173,10 +141,8 @@ local create_worktree = function(opts)
             end
 
             local name = ''
-
-            print("cwd: " .. vim.fn.cwd())
-            if not M.has_worktrees(vim.fn.cwd()) then
-                print("No worktrees")
+            local is_inside_work_tree = vim.fn.system('git rev-parse --is-inside-work-tree')
+            if is_inside_work_tree ~= 'true\n' then
                 if starts_with(branch, 'feature') then
                     print("The string starts with 'feature'")
                     local function removePrefix(s, prefix)
