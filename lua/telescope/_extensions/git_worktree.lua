@@ -144,7 +144,6 @@ local create_worktree = function(opts)
             local is_inside_work_tree = vim.fn.system('git rev-parse --is-inside-work-tree')
             if is_inside_work_tree ~= 'true\n' then
                 if starts_with(branch, 'feature') then
-                    print("The string starts with 'feature'")
                     local function removePrefix(s, prefix)
                         return string.gsub(s, '^' .. prefix, '')
                     end
@@ -154,7 +153,6 @@ local create_worktree = function(opts)
                 end
             else
                 if starts_with(branch, 'feature') then
-                    print("The string starts with 'feature'")
                     local function removePrefix(s, prefix)
                         return string.gsub(s, '^' .. prefix, '')
                     end
