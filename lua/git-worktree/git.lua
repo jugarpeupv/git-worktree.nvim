@@ -8,41 +8,44 @@ local M = {}
 -- A lot of this could be cleaned up if there was better job -> job -> function
 -- communication.  That should be doable here in the near future
 ---
----@param path_str string path to the worktree to check. if relative, then path from the git root dir
+---@param path_str string path to the worktree to check
+---@param branch string? branch the worktree is associated with
 ---@param cb any
-function M.has_worktree(path_str, cb)
+function M.has_worktree(path_str, branch, cb)
     local found = false
-    local path = Path:new(path_str)
+    local path
 
     if path_str == '.' then
         path_str = vim.loop.cwd()
-        path = Path:new(path_str)
     end
+
+    path = Path:new(path_str)
+    if not path:is_absolute() then
+        path = Path:new(string.format('%s' .. Path.path.sep .. '%s', vim.loop.cwd(), path_str))
+    end
+    path = path:absolute()
+
+    Log.debug('has_worktree: %s %s', path, branch)
 
     local job = Job:new {
         command = 'git',
-        args = { 'worktree', 'list' },
-        on_stdout = function(_, data)
-            local list_data = {}
-            for section in data:gmatch('%S+') do
-                table.insert(list_data, section)
+        args = { 'worktree', 'list', '--porcelain' },
+        on_stdout = function(_, line)
+            if line:match('^worktree ') then
+                local current_worktree = Path:new(line:match('^worktree (.+)$')):absolute()
+                Log.debug('current_worktree: "%s"', current_worktree)
+                if path == current_worktree then
+                    found = true
+                    return
+                end
+            elseif branch ~= nil and line:match('^branch ') then
+                local worktree_branch = line:match('^branch (.+)$')
+                Log.debug('worktree_branch: %s', worktree_branch)
+                if worktree_branch == 'refs/heads/' .. branch then
+                    found = true
+                    return
+                end
             end
-
-            data = list_data[1]
-
-            local start
-            if path:is_absolute() then
-                start = data == path_str
-            else
-                local worktree_path = Path:new(string.format('%s' .. Path.path.sep .. '%s', vim.loop.cwd(), path_str))
-                worktree_path = worktree_path:absolute()
-                start = data == worktree_path
-            end
-
-            -- TODO: This is clearly a hack (do not think we need this anymore?)
-            --local start_with_head = string.find(data, string.format('[heads/%s]', path), 1, true)
-            found = found or start
-            Log.debug('found: %s', found)
         end,
         cwd = vim.loop.cwd(),
     }
@@ -108,15 +111,18 @@ function M.toplevel_dir()
     return table.concat(stdout, '')
 end
 
-function M.has_branch(branch, cb)
+function M.has_branch(branch, opts, cb)
     local found = false
+    local args = { 'branch', '--format=%(refname:short)' }
+    opts = opts or {}
+    for _, opt in ipairs(opts) do
+        args[#args + 1] = opt
+    end
+
     local job = Job:new {
         command = 'git',
-        args = { 'branch' },
+        args = args,
         on_stdout = function(_, data)
-            -- remove  markere on current branch
-            data = data:gsub('*', '')
-            data = vim.trim(data)
             found = found or data == branch
         end,
         cwd = vim.loop.cwd(),
@@ -129,20 +135,32 @@ function M.has_branch(branch, cb)
 end
 
 --- @param path string
---- @param branch string
+--- @param branch string?
 --- @param found_branch boolean
+--- @param upstream string
+--- @param found_upstream boolean
 --- @return Job
-function M.create_worktree_job(path, branch, found_branch)
+function M.create_worktree_job(path, branch, found_branch, upstream, found_upstream)
     local worktree_add_cmd = 'git'
     local worktree_add_args = { 'worktree', 'add' }
 
-    if not found_branch then
-        table.insert(worktree_add_args, '-b')
-        table.insert(worktree_add_args, branch)
+    if branch == nil then
+        table.insert(worktree_add_args, '-d')
         table.insert(worktree_add_args, path)
     else
-        table.insert(worktree_add_args, path)
-        table.insert(worktree_add_args, branch)
+        if not found_branch then
+            table.insert(worktree_add_args, '-b')
+            table.insert(worktree_add_args, branch)
+            table.insert(worktree_add_args, path)
+
+            if found_upstream and branch ~= upstream then
+                table.insert(worktree_add_args, '--track')
+                table.insert(worktree_add_args, upstream)
+            end
+        else
+            table.insert(worktree_add_args, path)
+            table.insert(worktree_add_args, branch)
+        end
     end
 
     return Job:new {
@@ -195,7 +213,7 @@ end
 --- @return Job
 function M.setbranch_job(path, branch, upstream)
     local set_branch_cmd = 'git'
-    local set_branch_args = { 'branch', string.format('--set-upstream-to=%s/%s', upstream, branch) }
+    local set_branch_args = { 'branch', branch, string.format('--set-upstream-to=%s', upstream) }
     return Job:new {
         command = set_branch_cmd,
         args = set_branch_args,
@@ -234,6 +252,51 @@ function M.rebase_job(path)
         cwd = path,
         on_start = function()
             Log.debug('git rebase')
+        end,
+    }
+end
+
+--- @param path string
+--- @return string|nil
+function M.parse_head(path)
+    local job = Job:new {
+        command = 'git',
+        args = { 'rev-parse', '--abbrev-ref', 'HEAD' },
+        cwd = path,
+        on_start = function()
+            Log.debug('git rev-parse --abbrev-ref HEAD')
+        end,
+    }
+
+    local stdout, code = job:sync()
+    if code ~= 0 then
+        Log.error('Error in parsing the HEAD: code:' .. tostring(code) .. ' out: ' .. table.concat(stdout, '') .. '.')
+        return nil
+    end
+
+    return table.concat(stdout, '')
+end
+
+--- @param branch string
+--- @return Job|nil
+function M.delete_branch_job(branch)
+    local root = M.gitroot_dir()
+    if root == nil then
+        return nil
+    end
+
+    local default = M.parse_head(root)
+    if default == branch then
+        print('Refusing to delete default branch')
+        return nil
+    end
+
+    return Job:new {
+        command = 'git',
+        args = { 'branch', '-D', branch },
+        cwd = M.gitroot_dir(),
+        on_start = function()
+            Log.debug('git branch -D')
         end,
     }
 end

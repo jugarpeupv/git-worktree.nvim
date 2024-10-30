@@ -14,6 +14,15 @@ local function get_absolute_path(path)
 end
 
 local function change_dirs(path)
+    if path == nil then
+        local out = vim.fn.systemlist('git rev-parse --git-common-dir')
+        if vim.v.shell_error ~= 0 then
+            Log.error('Could not parse common dir')
+            return
+        end
+        path = out[1]
+    end
+
     Log.info('changing dirs:  %s ', path)
     local worktree_path = get_absolute_path(path)
     local previous_worktree = vim.loop.cwd()
@@ -25,7 +34,7 @@ local function change_dirs(path)
         Log.debug('Changing to directory  %s', worktree_path)
         vim.cmd(cmd)
     else
-        Log.error('Could not chang to directory: %s', worktree_path)
+        Log.error('Could not change to directory: %s', worktree_path)
     end
 
     if Config.clearjumps_on_change then
@@ -33,6 +42,7 @@ local function change_dirs(path)
         vim.cmd('clearjumps')
     end
 
+    print(string.format('Switched to %s', path))
     return previous_worktree
 end
 
@@ -60,25 +70,31 @@ local M = {}
 --- SWITCH ---
 
 --Switch the current worktree
----@param path string
+---@param path string?
 function M.switch(path)
-    Git.has_worktree(path, function(found)
-        Log.debug('test')
-        if not found then
-            Log.error('worktree does not exists, please create it first %s ', path)
+    if path == nil then
+        change_dirs(path)
+    else
+        if path == vim.loop.cwd() then
+            return
         end
-        Log.debug('has worktree')
+        Git.has_worktree(path, nil, function(found)
+            if not found then
+                Log.error('Worktree does not exists, please create it first %s ', path)
+                return
+            end
 
-        vim.schedule(function()
-            local prev_path = change_dirs(path)
-            Hooks.emit(Hooks.type.SWITCH, path, prev_path)
+            vim.schedule(function()
+                local prev_path = change_dirs(path)
+                Hooks.emit(Hooks.type.SWITCH, path, prev_path)
+            end)
         end)
-    end)
+    end
 end
 
 --- CREATE ---
 
---crerate a worktree
+--create a worktree
 ---@param path string
 ---@param branch string
 ---@param upstream? string
@@ -91,67 +107,53 @@ function M.create(path, branch, upstream)
 
     -- M.setup_git_info()
 
-    Git.has_worktree(path, function(found)
+    Git.has_worktree(path, branch, function(found)
         if found then
-            Log.error('worktree already exists')
+            Log.error('Path "%s" or branch "%s" already in use.', path, branch)
             return
         end
 
-        Git.has_branch(branch, function(found_branch)
-            Config = require('git-worktree.config')
-            local worktree_path
-            if Path:new(path):is_absolute() then
-                worktree_path = path
-            else
-                worktree_path = Path:new(vim.loop.cwd(), path):absolute()
+        if branch == '' then
+            -- detached head
+            local create_wt_job = Git.create_worktree_job(path, nil, false, nil, false)
+            create_wt_job:after(function()
+                vim.schedule(function()
+                    Hooks.emit(Hooks.type.CREATE, path, branch, upstream)
+                    M.switch(path)
+                end)
+            end)
+            create_wt_job:start()
+            return
+        end
+
+        Git.has_branch(branch, { '--remotes' }, function(found_remote_branch)
+            Log.debug('Found remote branch %s? %s', branch, found_remote_branch)
+            if found_remote_branch then
+                upstream = branch
+                branch = 'local/' .. branch
             end
+            Git.has_branch(branch, nil, function(found_branch)
+                Log.debug('Found branch %s? %s', branch, found_branch)
+                Git.has_branch(upstream, { '--all' }, function(found_upstream)
+                    Log.debug('Found upstream %s? %s', upstream, found_upstream)
 
-            -- create_worktree(path, branch, upstream, found_branch)
-            local create_wt_job = Git.create_worktree_job(path, branch, found_branch)
+                    local create_wt_job = Git.create_worktree_job(path, branch, found_branch, upstream, found_upstream)
 
-            if upstream ~= nil then
-                local fetch = Git.fetchall_job(path, branch, upstream)
-                local set_branch = Git.setbranch_job(path, branch, upstream)
-                local set_push = Git.setpush_job(path, branch, upstream)
-                local rebase = Git.rebase_job(path)
-
-                create_wt_job:and_then_on_success(fetch)
-                fetch:and_then_on_success(set_branch)
-
-                if Config.autopush then
-                    -- These are "optional" operations.
-                    -- We have to figure out how we want to handle these...
-                    set_branch:and_then(set_push)
-                    set_push:and_then(rebase)
-                    set_push:after_failure(failure('create_worktree', set_branch.args, worktree_path, true))
-                else
-                    set_branch:and_then(rebase)
-                end
-
-                create_wt_job:after_failure(failure('create_worktree', create_wt_job.args, vim.loop.cwd()))
-                fetch:after_failure(failure('create_worktree', fetch.args, worktree_path))
-
-                set_branch:after_failure(failure('create_worktree', set_branch.args, worktree_path, true))
-
-                rebase:after(function()
-                    if rebase.code ~= 0 then
-                        Log.devel("Rebase failed, but that's ok.")
+                    if found_branch and found_upstream and branch ~= upstream then
+                        local set_remote = Git.setbranch_job(path, branch, upstream)
+                        create_wt_job:and_then_on_success(set_remote)
                     end
 
-                    vim.schedule(function()
-                        Hooks.emit(Hooks.type.CREATE, path, branch, upstream)
-                        M.switch(path)
+                    create_wt_job:after(function()
+                        vim.schedule(function()
+                            Hooks.emit(Hooks.type.CREATE, path, branch, upstream)
+                            M.switch(path)
+                        end)
                     end)
+
+                    create_wt_job:start()
                 end)
-            else
-                create_wt_job:after(function()
-                    vim.schedule(function()
-                        Hooks.emit(Hooks.type.CREATE, path, branch, upstream)
-                        M.switch(path)
-                    end)
-                end)
-            end
-            create_wt_job:start()
+            end)
         end)
     end)
 end
@@ -167,12 +169,12 @@ function M.delete(path, force, opts)
         opts = {}
     end
 
-    Git.has_worktree(path, function(found)
-        Log.info('OMG here')
+    local branch = Git.parse_head(path)
+
+    Git.has_worktree(path, nil, function(found)
         if not found then
             Log.error('Worktree %s does not exist', path)
-        else
-            Log.info('Worktree %s does exist', path)
+            return
         end
 
         local delete = Git.delete_worktree_job(path, force)
@@ -180,7 +182,7 @@ function M.delete(path, force, opts)
             Log.info('delete after success')
             Hooks.emit(Hooks.type.DELETE, path)
             if opts.on_success then
-                opts.on_success()
+                opts.on_success { branch = branch }
             end
         end))
 

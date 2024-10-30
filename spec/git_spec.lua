@@ -34,7 +34,7 @@ describe('git-worktree git operations', function()
             local completed = false
             local ret = false
 
-            gwt_git.has_worktree(master_dir, function(found)
+            gwt_git.has_worktree(master_dir, nil, function(found)
                 completed = true
                 ret = found
             end)
@@ -49,7 +49,7 @@ describe('git-worktree git operations', function()
             local completed = false
             local ret = false
 
-            gwt_git.has_worktree('.', function(found)
+            gwt_git.has_worktree('.', nil, function(found)
                 completed = true
                 ret = found
             end)
@@ -64,7 +64,7 @@ describe('git-worktree git operations', function()
             local completed = false
             local ret = false
 
-            gwt_git.has_worktree('/tmp', function(found)
+            gwt_git.has_worktree('/tmp', nil, function(found)
                 completed = true
                 ret = found
             end)
@@ -79,7 +79,7 @@ describe('git-worktree git operations', function()
             local completed = false
             local ret = false
 
-            gwt_git.has_worktree('../foo', function(found)
+            gwt_git.has_worktree('../foo', nil, function(found)
                 completed = true
                 ret = found
             end)
@@ -111,7 +111,7 @@ describe('git-worktree git operations', function()
             local completed = false
             local ret = false
 
-            gwt_git.has_worktree(working_dir, function(found)
+            gwt_git.has_worktree(working_dir, nil, function(found)
                 completed = true
                 ret = found
             end)
@@ -126,7 +126,7 @@ describe('git-worktree git operations', function()
             local completed = false
             local ret = false
 
-            gwt_git.has_worktree('.', function(found)
+            gwt_git.has_worktree('.', nil, function(found)
                 completed = true
                 ret = found
             end)
@@ -141,7 +141,7 @@ describe('git-worktree git operations', function()
             local completed = false
             local ret = false
 
-            gwt_git.has_worktree('/tmp', function(found)
+            gwt_git.has_worktree('/tmp', nil, function(found)
                 completed = true
                 ret = found
             end)
@@ -156,7 +156,7 @@ describe('git-worktree git operations', function()
             local completed = false
             local ret = false
 
-            gwt_git.has_worktree('../foo', function(found)
+            gwt_git.has_worktree('../foo', nil, function(found)
                 completed = true
                 ret = found
             end)

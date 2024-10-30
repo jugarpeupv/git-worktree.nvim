@@ -23,7 +23,7 @@ local M = {}
 local Worktree = require('git-worktree.worktree')
 
 --Switch the current worktree
----@param path string
+---@param path string?
 function M.switch_worktree(path)
     Worktree.switch(path)
 end
