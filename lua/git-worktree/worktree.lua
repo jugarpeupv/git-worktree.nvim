@@ -42,7 +42,7 @@ local function change_dirs(path)
         vim.cmd('clearjumps')
     end
 
-    print(string.format('Switched to %s', path))
+    -- print(string.format('Switched to %s', path))
     return previous_worktree
 end
 

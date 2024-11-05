@@ -11,6 +11,14 @@ local Config = require('git-worktree.config')
 local Git = require('git-worktree.git')
 local Log = require('git-worktree.logger')
 
+local function starts_with(str, prefix2)
+    return string.sub(str, 1, string.len(prefix2)) == prefix2
+end
+
+local function removePrefix(s, prefix2)
+    return string.gsub(s, '^' .. prefix2, '')
+end
+
 local force_next_deletion = false
 
 -- Get the path of the selected worktree
@@ -77,13 +85,13 @@ end
 -- Confirm the deletion of a worktree
 -- @return boolean: whether the deletion is confirmed
 local confirm_branch_deletion = function()
-    local confirmed = vim.fn.input('Worktree deleted, now force deletion of branch? [y/n]: ')
-
-    if string.sub(string.lower(confirmed), 0, 1) == 'y' then
-        return true
-    end
-
-    print("Didn't delete branch")
+    -- local confirmed = vim.fn.input('Worktree deleted, now force deletion of branch? [y/n]: ')
+    --
+    -- if string.sub(string.lower(confirmed), 0, 1) == 'y' then
+    --     return true
+    -- end
+    --
+    -- print("Didn't delete branch")
     return false
 end
 
@@ -138,13 +146,34 @@ local create_input_prompt = function(opts, cb)
     opts.pattern = nil -- show all branches that can be tracked
 
     local prefix = opts.prefix or ''
-    local path = vim.fn.input('Path to subtree > ', prefix .. opts.branch)
+    -- local path = vim.fn.input('Path to subtree > ', prefix .. opts.branch)
+
+    -- CUSTOM CODE -- START
+    local path = ''
+
+    local is_inside_work_tree = vim.fn.system('git rev-parse --is-inside-work-tree')
+    if is_inside_work_tree ~= 'true\n' then
+        if starts_with(opts.branch, 'feature') then
+            path = './wt-' .. removePrefix(opts.branch, 'feature/')
+        else
+            path = './wt-' .. opts.branch
+        end
+    else
+        if starts_with(opts.branch, 'feature') then
+            path = '../wt-' .. removePrefix(opts.branch, 'feature/')
+        else
+            path = '../wt-' .. opts.branch
+        end
+    end
+    -- CUSTOM CODE -- FINISH
+
     if path == '' then
         Log.error('No worktree path provided')
         return
     end
 
     if opts.branch == '' then
+        Log.error('opts.branch not provided')
         cb(path, nil)
         return
     end
@@ -157,7 +186,10 @@ local create_input_prompt = function(opts, cb)
 
     local re = string.format('git branch --remotes --list %s', opts.branch)
     local remote_branch = vim.fn.systemlist(re)
+    print('imprimiendo: ')
+    print(vim.inspect(remote_branch))
     if #remote_branch == 1 then
+        print('entrando aqui')
         cb(path, nil)
         return
     end
@@ -184,13 +216,24 @@ end
 -- @param opts table: the options for the telescope picker (optional)
 -- @return nil
 local telescope_create_worktree = function(opts)
-    git_worktree.switch_worktree(nil)
+    -- git_worktree.switch_worktree(nil)
     opts = opts or {}
 
     local create_branch = function(prompt_bufnr, _)
         -- if current_line is still not enough to filter everything but user
         -- still wants to use it as the new branch name, without selecting anything
         local branch = action_state.get_current_line()
+        if branch == nil or branch == '' then
+            branch = action_state.get_selected_entry().name
+        end
+        if starts_with(branch, 'origin') then
+            branch = removePrefix(branch, 'origin/')
+        end
+
+        if starts_with(branch, 'remote') then
+            branch = removePrefix(branch, 'remote/')
+        end
+
         actions.close(prompt_bufnr)
         opts.branch = branch
         create_input_prompt(opts, function(path, upstream)
@@ -216,7 +259,7 @@ local telescope_create_worktree = function(opts)
     end
 
     opts.attach_mappings = function(_, map)
-        map({ 'i', 'n' }, '<tab>', create_branch)
+        map({ 'i', 'n' }, '<c-a>', create_branch)
         actions.select_default:replace(select_or_create_branch)
         return true
     end
@@ -305,14 +348,14 @@ local telescope_git_worktree = function(opts)
             attach_mappings = function(_, map)
                 action_set.select:replace(switch_worktree)
 
-                map('i', '<m-c>', function()
+                map('i', '<tab>', function()
                     telescope_create_worktree {}
                 end)
-                map('n', '<m-c>', function()
+                map('n', '<tab>', function()
                     telescope_create_worktree {}
                 end)
-                map('i', '<m-d>', delete_worktree)
-                map('n', '<m-d>', delete_worktree)
+                map('i', '<c-d>', delete_worktree)
+                map('n', '<c-d>', delete_worktree)
                 map('i', '<c-f>', toggle_forced_deletion)
                 map('n', '<c-f>', toggle_forced_deletion)
 
