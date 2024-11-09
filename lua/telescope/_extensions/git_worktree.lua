@@ -145,7 +145,7 @@ local create_input_prompt = function(opts, cb)
     opts = opts or {}
     opts.pattern = nil -- show all branches that can be tracked
 
-    local prefix = opts.prefix or ''
+    -- local prefix = opts.prefix or ''
     -- local path = vim.fn.input('Path to subtree > ', prefix .. opts.branch)
 
     -- CUSTOM CODE -- START
@@ -184,32 +184,63 @@ local create_input_prompt = function(opts, cb)
         return
     end
 
-    local re = string.format('git branch --remotes --list %s', opts.branch)
-    local remote_branch = vim.fn.systemlist(re)
-    print('imprimiendo: ')
-    print(vim.inspect(remote_branch))
-    if #remote_branch == 1 then
-        print('entrando aqui')
+    local remotes = vim.fn.systemlist('git remote')
+
+    if #remotes == 0 then
+        Log.info('No remotes found')
         cb(path, nil)
         return
     end
 
-    local confirmed = vim.fn.input('Track an upstream? [y/n]: ')
-    if string.sub(string.lower(confirmed), 0, 1) == 'y' then
-        opts.attach_mappings = function()
-            actions.select_default:replace(function(prompt_bufnr, _)
-                local selected_entry = action_state.get_selected_entry()
-                local current_line = action_state.get_current_line()
-                actions.close(prompt_bufnr)
-                local upstream = selected_entry ~= nil and selected_entry.value or current_line
-                cb(path, upstream)
-            end)
-            return true
+    -- remote whitespaces
+    for i, v in ipairs(remotes) do
+        remotes[i] = string.gsub(v, "^%s+", "")
+    end
+
+    local remote = remotes[1]
+    local remote_branches = vim.fn.systemlist('git branch --remotes --list')
+
+    for i, v in ipairs(remote_branches) do
+        remote_branches[i] = string.gsub(v, "^%s+", "")
+    end
+
+    local remote_branch = remote .. '/' .. opts.branch
+
+    local function is_present_in_table(tbl, str)
+        for _, value in ipairs(tbl) do
+            if value == str then
+                return true
+            end
         end
-        require('telescope.builtin').git_branches(opts)
+        return false
+    end
+
+    local is_remote_branch_in_remote_branches_list = is_present_in_table(remote_branches, remote_branch)
+
+    if is_remote_branch_in_remote_branches_list then
+        Log.info('Remote branch found: ' .. remote_branch)
+        cb(path, remote_branch)
+        return
     else
         cb(path, nil)
     end
+
+    -- local confirmed = vim.fn.input('Track an upstream? [y/n]: ')
+    -- if string.sub(string.lower(confirmed), 0, 1) == 'y' then
+    --     opts.attach_mappings = function()
+    --         actions.select_default:replace(function(prompt_bufnr, _)
+    --             local selected_entry = action_state.get_selected_entry()
+    --             local current_line = action_state.get_current_line()
+    --             actions.close(prompt_bufnr)
+    --             local upstream = selected_entry ~= nil and selected_entry.value or current_line
+    --             cb(path, upstream)
+    --         end)
+    --         return true
+    --     end
+    --     require('telescope.builtin').git_branches(opts)
+    -- else
+    --     cb(path, nil)
+    -- end
 end
 
 -- Create a worktree
@@ -219,27 +250,27 @@ local telescope_create_worktree = function(opts)
     -- git_worktree.switch_worktree(nil)
     opts = opts or {}
 
-    local create_branch = function(prompt_bufnr, _)
-        -- if current_line is still not enough to filter everything but user
-        -- still wants to use it as the new branch name, without selecting anything
-        local branch = action_state.get_current_line()
-        if branch == nil or branch == '' then
-            branch = action_state.get_selected_entry().name
-        end
-        if starts_with(branch, 'origin') then
-            branch = removePrefix(branch, 'origin/')
-        end
-
-        if starts_with(branch, 'remote') then
-            branch = removePrefix(branch, 'remote/')
-        end
-
-        actions.close(prompt_bufnr)
-        opts.branch = branch
-        create_input_prompt(opts, function(path, upstream)
-            git_worktree.create_worktree(path, branch, upstream)
-        end)
-    end
+    -- local create_branch = function(prompt_bufnr, _)
+    --     -- if current_line is still not enough to filter everything but user
+    --     -- still wants to use it as the new branch name, without selecting anything
+    --     local branch = action_state.get_current_line()
+    --     if branch == nil or branch == '' then
+    --         branch = action_state.get_selected_entry().name
+    --     end
+    --     if starts_with(branch, 'origin') then
+    --         branch = removePrefix(branch, 'origin/')
+    --     end
+    --
+    --     if starts_with(branch, 'remote') then
+    --         branch = removePrefix(branch, 'remote/')
+    --     end
+    --
+    --     actions.close(prompt_bufnr)
+    --     opts.branch = branch
+    --     create_input_prompt(opts, function(path, upstream)
+    --         git_worktree.create_worktree(path, branch, upstream)
+    --     end)
+    -- end
 
     local select_or_create_branch = function(prompt_bufnr, _)
         local selected_entry = action_state.get_selected_entry()
@@ -247,7 +278,9 @@ local telescope_create_worktree = function(opts)
         actions.close(prompt_bufnr)
         -- selected_entry can be null if current_line filters everything
         -- and there's no branch shown
+
         local branch = selected_entry ~= nil and selected_entry.value or current_line
+
         if branch == nil or branch == '' then
             Log.error('No branch selected')
             return
@@ -259,7 +292,8 @@ local telescope_create_worktree = function(opts)
     end
 
     opts.attach_mappings = function(_, map)
-        map({ 'i', 'n' }, '<c-a>', create_branch)
+        -- map({ 'i', 'n' }, '<c-a>', create_branch)
+        map({ 'i', 'n' }, '<c-a>', select_or_create_branch)
         actions.select_default:replace(select_or_create_branch)
         return true
     end
