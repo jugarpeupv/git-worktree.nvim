@@ -10,6 +10,7 @@ local git_worktree = require('git-worktree')
 local Config = require('git-worktree.config')
 local Git = require('git-worktree.git')
 local Log = require('git-worktree.logger')
+local Job = require('plenary.job')
 
 local function starts_with(str, prefix2)
     return string.sub(str, 1, string.len(prefix2)) == prefix2
@@ -194,14 +195,14 @@ local create_input_prompt = function(opts, cb)
 
     -- remote whitespaces
     for i, v in ipairs(remotes) do
-        remotes[i] = string.gsub(v, "^%s+", "")
+        remotes[i] = string.gsub(v, '^%s+', '')
     end
 
     local remote = remotes[1]
     local remote_branches = vim.fn.systemlist('git branch --remotes --list')
 
     for i, v in ipairs(remote_branches) do
-        remote_branches[i] = string.gsub(v, "^%s+", "")
+        remote_branches[i] = string.gsub(v, '^%s+', '')
     end
 
     local remote_branch = remote .. '/' .. opts.branch
@@ -286,6 +287,38 @@ local telescope_create_worktree = function(opts)
             return
         end
         opts.branch = branch
+
+        if starts_with(branch, 'origin') then
+            branch = removePrefix(branch, 'origin/')
+            opts.branch = branch
+
+            local job = Job:new {
+                command = 'git',
+                args = { 'branch', '--track', branch, 'origin/' .. branch },
+                cwd = vim.loop.cwd(),
+                on_stderr = function(_, data)
+                    Log.error('ERROR: ' .. data)
+                end,
+            }
+
+            local stdout, code = job:sync()
+
+            if code ~= 0 then
+                Log.error(
+                    'Error running git branch --track'
+                    .. branch
+                    .. ' origin/'
+                    .. branch
+                    .. ': code:'
+                    .. tostring(code)
+                    .. ' out: '
+                    .. table.concat(stdout, '')
+                    .. '.'
+                )
+                return nil
+            end
+        end
+
         create_input_prompt(opts, function(path, upstream)
             git_worktree.create_worktree(path, branch, upstream)
         end)
