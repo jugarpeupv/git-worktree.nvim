@@ -141,6 +141,11 @@ end
 --- @param found_upstream boolean
 --- @return Job
 function M.create_worktree_job(path, branch, found_branch, upstream, found_upstream)
+    print('Julio: Creating worktree for ', path)
+    print('Julio: Branch: ', branch)
+    print('Julio: Found Branch: ',  vim.inspect(found_branch))
+    print('Julio: Upstream: ', upstream)
+    print('Julio: Found Upstream: ', vim.inspect(found_upstream))
     local worktree_add_cmd = 'git'
     local worktree_add_args = { 'worktree', 'add' }
 
@@ -153,7 +158,7 @@ function M.create_worktree_job(path, branch, found_branch, upstream, found_upstr
             table.insert(worktree_add_args, branch)
             table.insert(worktree_add_args, path)
 
-            if found_upstream and branch ~= upstream then
+            if found_upstream and branch ~= upstream and upstream then
                 table.insert(worktree_add_args, '--track')
                 table.insert(worktree_add_args, upstream)
             end

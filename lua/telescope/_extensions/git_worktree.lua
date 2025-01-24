@@ -186,6 +186,7 @@ local create_input_prompt = function(opts, cb)
     end
 
     local remotes = vim.fn.systemlist('git remote')
+    -- remotes = origin | upstream etc, remotes[1] sería origin
 
     if #remotes == 0 then
         Log.info('No remotes found')
@@ -206,6 +207,8 @@ local create_input_prompt = function(opts, cb)
     end
 
     local remote_branch = remote .. '/' .. opts.branch
+    -- print('Remote branch: ', remote_branch)
+    -- print('remote branches: ', vim.inspect(remote_branches))
 
     local function is_present_in_table(tbl, str)
         for _, value in ipairs(tbl) do
