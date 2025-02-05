@@ -254,27 +254,53 @@ local telescope_create_worktree = function(opts)
     -- git_worktree.switch_worktree(nil)
     opts = opts or {}
 
-    -- local create_branch = function(prompt_bufnr, _)
-    --     -- if current_line is still not enough to filter everything but user
-    --     -- still wants to use it as the new branch name, without selecting anything
-    --     local branch = action_state.get_current_line()
-    --     if branch == nil or branch == '' then
-    --         branch = action_state.get_selected_entry().name
-    --     end
-    --     if starts_with(branch, 'origin') then
-    --         branch = removePrefix(branch, 'origin/')
-    --     end
-    --
-    --     if starts_with(branch, 'remote') then
-    --         branch = removePrefix(branch, 'remote/')
-    --     end
-    --
-    --     actions.close(prompt_bufnr)
-    --     opts.branch = branch
-    --     create_input_prompt(opts, function(path, upstream)
-    --         git_worktree.create_worktree(path, branch, upstream)
-    --     end)
-    -- end
+    local create_branch = function(prompt_bufnr, _)
+        -- if current_line is still not enough to filter everything but user
+        -- still wants to use it as the new branch name, without selecting anything
+        local branch = action_state.get_current_line()
+        if branch == nil or branch == '' then
+            branch = action_state.get_selected_entry().name
+        end
+
+        actions.close(prompt_bufnr)
+
+        opts.branch = branch
+
+        if starts_with(branch, 'origin') then
+            branch = removePrefix(branch, 'origin/')
+            opts.branch = branch
+
+            local job = Job:new {
+                command = 'git',
+                args = { 'branch', '--track', branch, 'origin/' .. branch },
+                cwd = vim.loop.cwd(),
+                on_stderr = function(_, data)
+                    Log.error('ERROR: ' .. data)
+                end,
+            }
+
+            local stdout, code = job:sync()
+
+            if code ~= 0 then
+                Log.error(
+                    'Error running git branch --track'
+                    .. branch
+                    .. ' origin/'
+                    .. branch
+                    .. ': code:'
+                    .. tostring(code)
+                    .. ' out: '
+                    .. table.concat(stdout, '')
+                    .. '.'
+                )
+                return nil
+            end
+        end
+
+        create_input_prompt(opts, function(path, upstream)
+            git_worktree.create_worktree(path, branch, upstream)
+        end)
+    end
 
     local select_or_create_branch = function(prompt_bufnr, _)
         local selected_entry = action_state.get_selected_entry()
@@ -328,8 +354,8 @@ local telescope_create_worktree = function(opts)
     end
 
     opts.attach_mappings = function(_, map)
-        -- map({ 'i', 'n' }, '<c-a>', create_branch)
-        map({ 'i', 'n' }, '<c-a>', select_or_create_branch)
+        map({ 'i', 'n' }, '<c-a>', create_branch)
+        -- map({ 'i', 'n' }, '<c-a>', select_or_create_branch)
         actions.select_default:replace(select_or_create_branch)
         return true
     end
