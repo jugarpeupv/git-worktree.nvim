@@ -154,14 +154,14 @@ local create_input_prompt = function(opts, cb)
 
     local is_inside_work_tree = vim.fn.system('git rev-parse --is-inside-work-tree')
     if is_inside_work_tree ~= 'true\n' then
-        if starts_with(opts.branch, 'feature') then
-            path = './wt-' .. removePrefix(opts.branch, 'feature/')
+        if string.find(opts.branch, '/') then
+            path = './wt-' .. opts.branch:gsub("/", "-")
         else
             path = './wt-' .. opts.branch
         end
     else
-        if starts_with(opts.branch, 'feature') then
-            path = '../wt-' .. removePrefix(opts.branch, 'feature/')
+        if string.find(opts.branch, '/') then
+            path = '../wt-' .. opts.branch:gsub("/", "-")
         else
             path = '../wt-' .. opts.branch
         end
