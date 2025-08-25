@@ -65,6 +65,30 @@ local function failure(from, cmd, path, soft_error)
     end
 end
 
+local function get_penultimate_wt(path)
+    local parsed_path = path:gsub("/wt%-[^/]+/?$", "/")
+
+    local file_utils = require('jg.custom.file-utils')
+    local bps_path = file_utils.get_bps_path(parsed_path)
+    local data = file_utils.load_bps(bps_path)
+    if data == nil then
+        print('No penultimate worktree found')
+        return nil
+    end
+    return data.penultimate_wt
+end
+
+local function copy_node_modules(path_from, path_to)
+    print('copy_node_modules: ' .. path_from .. ' -> ' .. path_to)
+    local prev_node_modules_path = path_from .. '/node_modules'
+    local destination_path = path_to .. '/node_modules'
+
+    local prev_node_modules_exists = vim.fn.isdirectory(prev_node_modules_path)
+    if prev_node_modules_exists ~= 0 then
+        os.rename(prev_node_modules_path, destination_path)
+    end
+end
+
 local M = {}
 
 --- SWITCH ---
@@ -148,6 +172,23 @@ function M.create(path, branch, upstream)
                         vim.schedule(function()
                             Hooks.emit(Hooks.type.CREATE, path, branch, upstream)
                             M.switch(path)
+
+                            local stashes = vim.fn.systemlist('git stash list')
+                            if #stashes <= 0 then
+                                return
+                            end
+
+                            local worktree_path = get_absolute_path(path)
+                            local Job = require('plenary.job')
+                            local stash_drop_job = Job:new {
+                                command = 'git',
+                                args = { 'stash', 'pop' },
+                                cwd = worktree_path,
+                                on_stderr = function(_, data)
+                                    Log.error('ERROR: ' .. data)
+                                end,
+                            }
+                            stash_drop_job:sync()
                         end)
                     end)
 
@@ -175,6 +216,14 @@ function M.delete(path, force, opts)
         if not found then
             Log.error('Worktree %s does not exist', path)
             return
+        end
+
+        local penultimate_wt = get_penultimate_wt(path)
+        local node_modules_exists_on_deleted_worktree = vim.fn.isdirectory(path .. '/node_modules') ~= 0
+        if node_modules_exists_on_deleted_worktree then
+            copy_node_modules(path, penultimate_wt)
+        else
+            print('No node_modules found on deleted worktree')
         end
 
         local delete = Git.delete_worktree_job(path, force)

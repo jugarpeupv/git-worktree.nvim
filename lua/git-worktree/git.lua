@@ -180,7 +180,11 @@ function M.delete_worktree_job(path, force)
     local worktree_del_cmd = 'git'
     local worktree_del_args = { 'worktree', 'remove', path }
 
-    if force then
+    -- if force then
+    --     table.insert(worktree_del_args, '--force')
+    -- end
+
+    if true then
         table.insert(worktree_del_args, '--force')
     end
 

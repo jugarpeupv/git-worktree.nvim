@@ -254,53 +254,53 @@ local telescope_create_worktree = function(opts)
     -- git_worktree.switch_worktree(nil)
     opts = opts or {}
 
-    local create_branch = function(prompt_bufnr, _)
-        -- if current_line is still not enough to filter everything but user
-        -- still wants to use it as the new branch name, without selecting anything
-        local branch = action_state.get_current_line()
-        if branch == nil or branch == '' then
-            branch = action_state.get_selected_entry().name
-        end
-
-        actions.close(prompt_bufnr)
-
-        opts.branch = branch
-
-        if starts_with(branch, 'origin') then
-            branch = removePrefix(branch, 'origin/')
-            opts.branch = branch
-
-            local job = Job:new {
-                command = 'git',
-                args = { 'branch', '--track', branch, 'origin/' .. branch },
-                cwd = vim.loop.cwd(),
-                on_stderr = function(_, data)
-                    Log.error('ERROR: ' .. data)
-                end,
-            }
-
-            local stdout, code = job:sync()
-
-            if code ~= 0 then
-                Log.error(
-                    'Error running git branch --track'
-                    .. branch
-                    .. ' origin/'
-                    .. branch
-                    .. ': code:'
-                    .. tostring(code)
-                    .. ' out: '
-                    .. table.concat(stdout, '')
-                    .. '.'
-                )
-                return nil
-            end
-        end
-
-        create_input_prompt(opts, function(path, upstream)
-            git_worktree.create_worktree(path, branch, upstream)
-        end)
-    end
+    -- local create_branch = function(prompt_bufnr, _)
+    --     -- if current_line is still not enough to filter everything but user
+    --     -- still wants to use it as the new branch name, without selecting anything
+    --     local branch = action_state.get_current_line()
+    --     if branch == nil or branch == '' then
+    --         branch = action_state.get_selected_entry().name
+    --     end
+    --
+    --     actions.close(prompt_bufnr)
+    --
+    --     opts.branch = branch
+    --
+    --     if starts_with(branch, 'origin') then
+    --         branch = removePrefix(branch, 'origin/')
+    --         opts.branch = branch
+    --
+    --         local job = Job:new {
+    --             command = 'git',
+    --             args = { 'branch', '--track', branch, 'origin/' .. branch },
+    --             cwd = vim.loop.cwd(),
+    --             on_stderr = function(_, data)
+    --                 Log.error('ERROR: ' .. data)
+    --             end,
+    --         }
+    --
+    --         local stdout, code = job:sync()
+    --
+    --         if code ~= 0 then
+    --             Log.error(
+    --                 'Error running git branch --track'
+    --                     .. branch
+    --                     .. ' origin/'
+    --                     .. branch
+    --                     .. ': code:'
+    --                     .. tostring(code)
+    --                     .. ' out: '
+    --                     .. table.concat(stdout, '')
+    --                     .. '.'
+    --             )
+    --             return nil
+    --         end
+    --     end
+    --
+    --     create_input_prompt(opts, function(path, upstream)
+    --         git_worktree.create_worktree(path, branch, upstream)
+    --     end)
+    -- end
 
     local select_or_create_branch = function(prompt_bufnr, _)
         local selected_entry = action_state.get_selected_entry()
@@ -309,13 +309,35 @@ local telescope_create_worktree = function(opts)
         -- selected_entry can be null if current_line filters everything
         -- and there's no branch shown
 
-        local branch = selected_entry ~= nil and selected_entry.value or current_line
+        local branch
+
+        if selected_entry == nil then
+            branch = current_line
+        end
+
+        if current_line == "" and selected_entry ~= nil then
+            branch = selected_entry.value
+        end
+
+        if current_line ~= "" and selected_entry ~= nil then
+            branch = selected_entry.value
+        end
 
         if branch == nil or branch == '' then
             Log.error('No branch selected')
             return
         end
         opts.branch = branch
+
+        -- check if a worktree is already created for this branch
+        local git_worktree_list_output = vim.fn.systemlist('git worktree list')
+        for _, line in ipairs(git_worktree_list_output) do
+            if string.find(line, branch) then
+                vim.notify('Worktree already exists for branch: ' .. branch, vim.log.levels.ERROR)
+                return
+            end
+        end
+
 
         if starts_with(branch, 'origin') then
             branch = removePrefix(branch, 'origin/')
@@ -335,26 +357,62 @@ local telescope_create_worktree = function(opts)
             if code ~= 0 then
                 Log.error(
                     'Error running git branch --track'
-                    .. branch
-                    .. ' origin/'
-                    .. branch
-                    .. ': code:'
-                    .. tostring(code)
-                    .. ' out: '
-                    .. table.concat(stdout, '')
-                    .. '.'
+                        .. branch
+                        .. ' origin/'
+                        .. branch
+                        .. ': code:'
+                        .. tostring(code)
+                        .. ' out: '
+                        .. table.concat(stdout, '')
+                        .. '.'
                 )
                 return nil
             end
         end
 
         create_input_prompt(opts, function(path, upstream)
+
+            local git_status_is_porcelain = function()
+                local output = vim.fn.systemlist('git status --porcelain')
+                if #output > 0 then
+                    return false
+                end
+                return true
+            end
+
+            -- We do NOT have git changes
+            if current_line == nil or current_line == '' or git_status_is_porcelain() then
+                git_worktree.create_worktree(path, branch, upstream)
+                return
+            end
+
+            -- We do have git changes
+            local stash_job = Job:new {
+                command = 'git',
+                args = { 'stash', '--include-untracked' },
+                cwd = vim.loop.cwd(),
+                on_stderr = function(_, data)
+                    Log.error('ERROR: ' .. data)
+                end,
+            }
+            stash_job:sync()
+
+            local stash_apply_job = Job:new {
+                command = 'git',
+                args = { 'stash', 'apply' },
+                cwd = vim.loop.cwd(),
+                on_stderr = function(_, data)
+                    Log.error('ERROR: ' .. data)
+                end,
+            }
+            stash_apply_job:sync()
+
             git_worktree.create_worktree(path, branch, upstream)
         end)
     end
 
     opts.attach_mappings = function(_, map)
-        map({ 'i', 'n' }, '<c-a>', create_branch)
+        -- map({ 'i', 'n' }, '<c-a>', create_branch)
         -- map({ 'i', 'n' }, '<c-a>', select_or_create_branch)
         actions.select_default:replace(select_or_create_branch)
         return true
