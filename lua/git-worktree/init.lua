@@ -32,8 +32,9 @@ end
 ---@param path string
 ---@param branch string
 ---@param upstream? string
-function M.create_worktree(path, branch, upstream)
-    Worktree.create(path, branch, upstream)
+---@param pop_stash? boolean
+function M.create_worktree(path, branch, upstream, pop_stash)
+    Worktree.create(path, branch, upstream, pop_stash)
 end
 
 --Delete a worktree

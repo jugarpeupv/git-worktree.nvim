@@ -407,7 +407,7 @@ local telescope_create_worktree = function(opts)
             }
             stash_apply_job:sync()
 
-            git_worktree.create_worktree(path, branch, upstream)
+            git_worktree.create_worktree(path, branch, upstream, true)
         end)
     end
 
@@ -508,8 +508,8 @@ local telescope_git_worktree = function(opts)
                 map('n', '<tab>', function()
                     telescope_create_worktree {}
                 end)
-                map('i', '<c-d>', delete_worktree)
-                map('n', '<c-d>', delete_worktree)
+                map('i', '<c-x>', delete_worktree)
+                map('n', '<c-x>', delete_worktree)
                 map('i', '<c-f>', toggle_forced_deletion)
                 map('n', '<c-f>', toggle_forced_deletion)
 

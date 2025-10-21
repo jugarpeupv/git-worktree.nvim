@@ -122,7 +122,8 @@ end
 ---@param path string
 ---@param branch string
 ---@param upstream? string
-function M.create(path, branch, upstream)
+---@param pop_stash? boolean
+function M.create(path, branch, upstream, pop_stash)
     -- if upstream == nil then
     --     if Git.has_origin() then
     --         upstream = 'origin'
@@ -174,7 +175,7 @@ function M.create(path, branch, upstream)
                             M.switch(path)
 
                             local stashes = vim.fn.systemlist('git stash list')
-                            if #stashes <= 0 then
+                            if #stashes <= 0 or not pop_stash then
                                 return
                             end
 
