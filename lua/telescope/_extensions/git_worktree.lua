@@ -22,6 +22,33 @@ end
 
 local force_next_deletion = false
 
+-- Get all git tags
+-- @return table: list of tag names
+local get_git_tags = function()
+    local tag_job = Job:new({
+        command = 'git',
+        args = { 'tag', '--sort=-version:refname' },
+    })
+    local ok, tags = pcall(function() return tag_job:sync() end)
+    if not ok then
+        return {}
+    end
+    return tags or {}
+end
+
+-- Check if a reference is a tag
+-- @param ref string: the reference to check
+-- @return boolean: true if it's a tag
+local is_tag = function(ref)
+    local tags = get_git_tags()
+    for _, tag in ipairs(tags) do
+        if tag == ref then
+            return true
+        end
+    end
+    return false
+end
+
 -- Get the path of the selected worktree
 -- @param prompt_bufnr number: the prompt buffer number
 -- @return string: the path of the selected worktree
@@ -310,6 +337,7 @@ local telescope_create_worktree = function(opts)
         -- and there's no branch shown
 
         local branch
+        local is_tag_selection = false
 
         if selected_entry == nil then
             branch = current_line
@@ -317,16 +345,67 @@ local telescope_create_worktree = function(opts)
 
         if current_line == "" and selected_entry ~= nil then
             branch = selected_entry.value
+            is_tag_selection = selected_entry.type == 'tag'
         end
 
         if current_line ~= "" and selected_entry ~= nil then
             branch = selected_entry.value
+            is_tag_selection = selected_entry.type == 'tag'
         end
 
         if branch == nil or branch == '' then
             Log.error('No branch selected')
             return
         end
+
+        -- If it's a tag, create a worktree with wt-<tag> branch name
+        if is_tag_selection then
+            local tag_name = branch
+            local new_branch = 'wt-' .. tag_name
+            
+            -- Generate path for the tag worktree
+            local path
+            local is_inside_work_tree = vim.fn.system('git rev-parse --is-inside-work-tree')
+            if is_inside_work_tree ~= 'true\n' then
+                path = './wt-' .. tag_name
+            else
+                path = '../wt-' .. tag_name
+            end
+
+            -- Check if a worktree already exists for this tag
+            local git_worktree_list_output = vim.fn.systemlist('git worktree list')
+            for _, line in ipairs(git_worktree_list_output) do
+                if string.find(line, new_branch) then
+                    vim.notify('Worktree already exists for tag: ' .. tag_name, vim.log.levels.ERROR)
+                    return
+                end
+            end
+
+            -- Create worktree for tag: git worktree add -b wt-<tag> <path> <tag>
+            local job = Job:new {
+                command = 'git',
+                args = { 'worktree', 'add', '-b', new_branch, path, tag_name },
+                cwd = vim.loop.cwd(),
+                on_stderr = function(_, data)
+                    Log.error('ERROR: ' .. data)
+                end,
+                on_exit = function(_, code)
+                    if code == 0 then
+                        vim.schedule(function()
+                            vim.notify('Created worktree for tag ' .. tag_name .. ' at ' .. path, vim.log.levels.INFO)
+                            git_worktree.switch_worktree(path)
+                        end)
+                    else
+                        vim.schedule(function()
+                            vim.notify('Failed to create worktree for tag ' .. tag_name, vim.log.levels.ERROR)
+                        end)
+                    end
+                end,
+            }
+            job:start()
+            return
+        end
+
         opts.branch = branch
 
         -- check if a worktree is already created for this branch
@@ -418,10 +497,43 @@ local telescope_create_worktree = function(opts)
         return true
     end
 
-    -- TODO: A corner case here is that of a new bare repo which has no branch nor tree,
-    -- but user may want to create one using this picker when creating the first worktree.
-    -- Perhaps telescope git_branches should only be used for selecting the upstream to track.
-    require('telescope.builtin').git_branches(opts)
+    -- Create a custom picker with both branches and tags
+    local branch_job = Job:new({
+        command = 'git',
+        args = { 'branch', '--all', '--format=%(refname:short)' },
+    })
+    local branches = branch_job:sync()
+    local tags = get_git_tags()
+    
+    -- Combine branches and tags with type information
+    local results = {}
+    for _, branch in ipairs(branches) do
+        table.insert(results, { value = branch, type = 'branch' })
+    end
+    for _, tag in ipairs(tags) do
+        table.insert(results, { value = tag, type = 'tag' })
+    end
+
+    pickers.new(opts, {
+        prompt_title = 'Create Worktree (Branches & Tags)',
+        finder = finders.new_table {
+            results = results,
+            entry_maker = function(entry)
+                local display_text = entry.value
+                if entry.type == 'tag' then
+                    display_text = entry.value .. ' [tag]'
+                end
+                return {
+                    value = entry.value,
+                    display = display_text,
+                    ordinal = entry.value,
+                    type = entry.type,
+                }
+            end,
+        },
+        sorter = conf.generic_sorter(opts),
+        attach_mappings = opts.attach_mappings,
+    }):find()
 end
 
 -- List the git worktrees
