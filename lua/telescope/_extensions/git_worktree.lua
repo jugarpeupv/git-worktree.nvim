@@ -25,11 +25,13 @@ local force_next_deletion = false
 -- Get all git tags
 -- @return table: list of tag names
 local get_git_tags = function()
-    local tag_job = Job:new({
+    local tag_job = Job:new {
         command = 'git',
         args = { 'tag', '--sort=-version:refname' },
-    })
-    local ok, tags = pcall(function() return tag_job:sync() end)
+    }
+    local ok, tags = pcall(function()
+        return tag_job:sync()
+    end)
     if not ok then
         return {}
     end
@@ -182,13 +184,13 @@ local create_input_prompt = function(opts, cb)
     local is_inside_work_tree = vim.fn.system('git rev-parse --is-inside-work-tree')
     if is_inside_work_tree ~= 'true\n' then
         if string.find(opts.branch, '/') then
-            path = './wt-' .. opts.branch:gsub("/", "-")
+            path = './wt-' .. opts.branch:gsub('/', '-')
         else
             path = './wt-' .. opts.branch
         end
     else
         if string.find(opts.branch, '/') then
-            path = '../wt-' .. opts.branch:gsub("/", "-")
+            path = '../wt-' .. opts.branch:gsub('/', '-')
         else
             path = '../wt-' .. opts.branch
         end
@@ -343,12 +345,12 @@ local telescope_create_worktree = function(opts)
             branch = current_line
         end
 
-        if current_line == "" and selected_entry ~= nil then
+        if current_line == '' and selected_entry ~= nil then
             branch = selected_entry.value
             is_tag_selection = selected_entry.type == 'tag'
         end
 
-        if current_line ~= "" and selected_entry ~= nil then
+        if current_line ~= '' and selected_entry ~= nil then
             branch = selected_entry.value
             is_tag_selection = selected_entry.type == 'tag'
         end
@@ -362,7 +364,7 @@ local telescope_create_worktree = function(opts)
         if is_tag_selection then
             local tag_name = branch
             local new_branch = 'wt-' .. tag_name
-            
+
             -- Generate path for the tag worktree
             local path
             local is_inside_work_tree = vim.fn.system('git rev-parse --is-inside-work-tree')
@@ -417,7 +419,6 @@ local telescope_create_worktree = function(opts)
             end
         end
 
-
         if starts_with(branch, 'origin') then
             branch = removePrefix(branch, 'origin/')
             opts.branch = branch
@@ -450,7 +451,6 @@ local telescope_create_worktree = function(opts)
         end
 
         create_input_prompt(opts, function(path, upstream)
-
             local git_status_is_porcelain = function()
                 local output = vim.fn.systemlist('git status --porcelain')
                 if #output > 0 then
@@ -497,43 +497,116 @@ local telescope_create_worktree = function(opts)
         return true
     end
 
-    -- Create a custom picker with both branches and tags
-    local branch_job = Job:new({
+    -- Create a custom picker with both branches and tags with metadata
+    local branch_job = Job:new {
         command = 'git',
-        args = { 'branch', '--all', '--format=%(refname:short)' },
-    })
-    local branches = branch_job:sync()
-    local tags = get_git_tags()
-    
-    -- Combine branches and tags with type information
+        args = { 'branch', '--all', '--format=%(refname:short)|%(authorname)|%(committerdate:relative)|%(subject)' },
+    }
+    local branch_lines = branch_job:sync()
+
+    local tag_job = Job:new {
+        command = 'git',
+        args = {
+            'for-each-ref',
+            '--sort=-creatordate',
+            '--format=%(refname:short)|%(authorname)|%(authordate:relative)|%(subject)',
+            'refs/tags',
+        },
+    }
+    local tag_lines = tag_job:sync()
+
+    -- Combine branches and tags with type information and metadata
     local results = {}
-    for _, branch in ipairs(branches) do
-        table.insert(results, { value = branch, type = 'branch' })
-    end
-    for _, tag in ipairs(tags) do
-        table.insert(results, { value = tag, type = 'tag' })
+    local widths = {
+        name = 0,
+        author = 0,
+        date = 0,
+    }
+
+    -- Parse branches
+    for _, line in ipairs(branch_lines) do
+        local parts = vim.split(line, '|', { plain = true })
+        local entry = {
+            value = parts[1] or '',
+            type = 'branch',
+            author = parts[2] or '',
+            date = parts[3] or '',
+            subject = parts[4] or '',
+        }
+        table.insert(results, entry)
+
+        -- Update widths
+        widths.name = math.max(widths.name, strings.strdisplaywidth(entry.value))
+        widths.author = math.max(widths.author, strings.strdisplaywidth(entry.author))
+        widths.date = math.max(widths.date, strings.strdisplaywidth(entry.date))
     end
 
-    pickers.new(opts, {
-        prompt_title = 'Create Worktree (Branches & Tags)',
-        finder = finders.new_table {
-            results = results,
-            entry_maker = function(entry)
-                local display_text = entry.value
-                if entry.type == 'tag' then
-                    display_text = entry.value .. ' [tag]'
-                end
-                return {
-                    value = entry.value,
-                    display = display_text,
-                    ordinal = entry.value,
-                    type = entry.type,
-                }
-            end,
+    -- Parse tags
+    for _, line in ipairs(tag_lines) do
+        local parts = vim.split(line, '|', { plain = true })
+        local entry = {
+            value = parts[1] or '',
+            type = 'tag',
+            author = parts[2] or '',
+            date = parts[3] or '',
+            subject = parts[4] or '',
+        }
+        table.insert(results, entry)
+
+        -- Update widths (add space for [tag] marker)
+        widths.name = math.max(widths.name, strings.strdisplaywidth(entry.value .. ' [tag]'))
+        widths.author = math.max(widths.author, strings.strdisplaywidth(entry.author))
+        widths.date = math.max(widths.date, strings.strdisplaywidth(entry.date))
+    end
+
+    -- Create displayer
+    local displayer = require('telescope.pickers.entry_display').create {
+        separator = ' ',
+        items = {
+            { width = widths.name },
+            { width = widths.author },
+            { width = widths.date },
+            { remaining = true },
         },
-        sorter = conf.generic_sorter(opts),
-        attach_mappings = opts.attach_mappings,
-    }):find()
+    }
+
+    local make_display = function(entry)
+        local display_name = entry.value
+        local name_hl = 'TelescopeResultsIdentifier'
+
+        if entry.type == 'tag' then
+            display_name = entry.value .. ' [tag]'
+        end
+
+        return displayer {
+            { display_name, name_hl },
+            { entry.author, 'TelescopeResultsComment' },
+            { entry.date, 'TelescopeResultsSpecialComment' },
+            { entry.subject, 'TelescopeResultsComment' },
+        }
+    end
+
+    pickers
+        .new(opts, {
+            prompt_title = 'Create Worktree (Branches & Tags)',
+            finder = finders.new_table {
+                results = results,
+                entry_maker = function(entry)
+                    return {
+                        value = entry.value,
+                        display = make_display,
+                        ordinal = entry.value,
+                        type = entry.type,
+                        author = entry.author,
+                        date = entry.date,
+                        subject = entry.subject,
+                    }
+                end,
+            },
+            sorter = conf.generic_sorter(opts),
+            attach_mappings = opts.attach_mappings,
+        })
+        :find()
 end
 
 -- List the git worktrees
