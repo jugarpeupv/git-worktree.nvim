@@ -168,6 +168,16 @@ local delete_worktree = function(prompt_bufnr)
     end
 end
 
+-- Build the worktree path from a name, replacing special characters with '-'
+-- @param name string: the branch/tag/custom name to use
+-- @return string: the worktree path (relative)
+local build_worktree_path = function(name)
+    local sanitized = name:gsub('[^%w%.%-_]', '-')
+    local is_inside_work_tree = vim.fn.system('git rev-parse --is-inside-work-tree')
+    local prefix = is_inside_work_tree == 'true\n' and '../' or './'
+    return prefix .. 'wt-' .. sanitized
+end
+
 -- Create a prompt to get the path of the new worktree
 -- @param cb function: the callback to call with the path
 -- @return nil
@@ -175,26 +185,8 @@ local create_input_prompt = function(opts, cb)
     opts = opts or {}
     opts.pattern = nil -- show all branches that can be tracked
 
-    -- local prefix = opts.prefix or ''
-    -- local path = vim.fn.input('Path to subtree > ', prefix .. opts.branch)
-
     -- CUSTOM CODE -- START
-    local path = ''
-
-    local is_inside_work_tree = vim.fn.system('git rev-parse --is-inside-work-tree')
-    if is_inside_work_tree ~= 'true\n' then
-        if string.find(opts.branch, '/') then
-            path = './wt-' .. opts.branch:gsub('/', '-')
-        else
-            path = './wt-' .. opts.branch
-        end
-    else
-        if string.find(opts.branch, '/') then
-            path = '../wt-' .. opts.branch:gsub('/', '-')
-        else
-            path = '../wt-' .. opts.branch
-        end
-    end
+    local path = build_worktree_path(opts.branch)
     -- CUSTOM CODE -- FINISH
 
     if path == '' then
@@ -331,7 +323,7 @@ local telescope_create_worktree = function(opts)
     --     end)
     -- end
 
-    local select_or_create_branch = function(prompt_bufnr, _)
+    local select_or_create_branch = function(prompt_bufnr, custom_name)
         local selected_entry = action_state.get_selected_entry()
         local current_line = action_state.get_current_line()
         actions.close(prompt_bufnr)
@@ -364,15 +356,7 @@ local telescope_create_worktree = function(opts)
         if is_tag_selection then
             local tag_name = branch
             local new_branch = 'wt-' .. tag_name
-
-            -- Generate path for the tag worktree
-            local path
-            local is_inside_work_tree = vim.fn.system('git rev-parse --is-inside-work-tree')
-            if is_inside_work_tree ~= 'true\n' then
-                path = './wt-' .. tag_name
-            else
-                path = '../wt-' .. tag_name
-            end
+            local path = custom_name and build_worktree_path(custom_name) or build_worktree_path(tag_name)
 
             -- Check if a worktree already exists for this tag
             local git_worktree_list_output = vim.fn.systemlist('git worktree list')
@@ -451,6 +435,11 @@ local telescope_create_worktree = function(opts)
         end
 
         create_input_prompt(opts, function(path, upstream)
+            -- Override the auto-generated path when the user provided a custom name
+            if custom_name then
+                path = build_worktree_path(custom_name)
+            end
+
             local git_status_is_porcelain = function()
                 local output = vim.fn.systemlist('git status --porcelain')
                 if #output > 0 then
@@ -491,9 +480,16 @@ local telescope_create_worktree = function(opts)
     end
 
     opts.attach_mappings = function(_, map)
-        -- map({ 'i', 'n' }, '<c-a>', create_branch)
-        -- map({ 'i', 'n' }, '<c-a>', select_or_create_branch)
-        actions.select_default:replace(select_or_create_branch)
+        actions.select_default:replace(function(prompt_bufnr)
+            select_or_create_branch(prompt_bufnr, nil)
+        end)
+        map({ 'i', 'n' }, '<C-e>', function(prompt_bufnr)
+            local custom_name = vim.fn.input('Worktree name (wt- will be prepended): ')
+            if custom_name == nil or custom_name == '' then
+                return
+            end
+            select_or_create_branch(prompt_bufnr, custom_name)
+        end)
         return true
     end
 
