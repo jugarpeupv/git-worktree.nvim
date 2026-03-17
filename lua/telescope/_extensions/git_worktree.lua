@@ -693,6 +693,35 @@ local telescope_git_worktree = function(opts)
                 map('n', '<c-x>', delete_worktree)
                 map('i', '<c-f>', toggle_forced_deletion)
                 map('n', '<c-f>', toggle_forced_deletion)
+                map({ 'i', 'n' }, '<c-y>', function(prompt_bufnr)
+                    local selection = action_state.get_selected_entry()
+                    if selection == nil then
+                        vim.notify('No worktree selected', vim.log.levels.WARN)
+                        return
+                    end
+                    local branch = selection.branch
+                    -- Strip surrounding brackets from [branch-name]
+                    branch = branch:gsub('^%[', ''):gsub('%]$', '')
+                    if branch == nil or branch == '' or branch == 'HEAD' then
+                        vim.notify('Cannot merge: no valid branch for selected worktree', vim.log.levels.WARN)
+                        return
+                    end
+                    local confirmed = vim.fn.input('Merge branch "' .. branch .. '" into current branch? [y/n]: ', 'y')
+                    if string.sub(string.lower(confirmed), 1, 1) ~= 'y' then
+                        vim.notify('Merge canceled', vim.log.levels.INFO)
+                        return
+                    end
+                    actions.close(prompt_bufnr)
+                    local _, ret, stderr = utils.get_os_command_output { 'git', 'merge', branch }
+                    if ret == 0 then
+                        vim.notify('Merged branch: ' .. branch, vim.log.levels.INFO)
+                    else
+                        vim.notify(
+                            'Error merging branch: ' .. branch .. '. Git returned: ' .. table.concat(stderr, ' '),
+                            vim.log.levels.ERROR
+                        )
+                    end
+                end)
 
                 return true
             end,
