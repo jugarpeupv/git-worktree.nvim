@@ -395,13 +395,13 @@ local telescope_create_worktree = function(opts)
         opts.branch = branch
 
         -- check if a worktree is already created for this branch
-        local git_worktree_list_output = vim.fn.systemlist('git worktree list')
-        for _, line in ipairs(git_worktree_list_output) do
-            if string.find(line, branch) then
-                vim.notify('Worktree already exists for branch: ' .. branch, vim.log.levels.ERROR)
-                return
-            end
-        end
+        -- local git_worktree_list_output = vim.fn.systemlist('git worktree list')
+        -- for _, line in ipairs(git_worktree_list_output) do
+        --     if string.find(line, branch) then
+        --         vim.notify('Worktree already exists for branch: ' .. branch, vim.log.levels.ERROR)
+        --         return
+        --     end
+        -- end
 
         if starts_with(branch, 'origin') then
             branch = removePrefix(branch, 'origin/')
