@@ -490,6 +490,18 @@ local telescope_create_worktree = function(opts)
             end
             select_or_create_branch(prompt_bufnr, custom_name)
         end)
+        map({ 'i', 'n' }, '<C-b>', function(prompt_bufnr)
+            local current_line = action_state.get_current_line()
+            if current_line == nil or current_line == '' then
+                vim.notify('No branch name typed', vim.log.levels.WARN)
+                return
+            end
+            actions.close(prompt_bufnr)
+            opts.branch = current_line
+            create_input_prompt(opts, function(path, upstream)
+                git_worktree.create_worktree(path, current_line, upstream)
+            end)
+        end)
         return true
     end
 
@@ -584,7 +596,7 @@ local telescope_create_worktree = function(opts)
 
     pickers
         .new(opts, {
-            prompt_title = 'Create Worktree (Branches & Tags)',
+            prompt_title = 'Create Worktree (Branches & Tags) [<c-b> use prompt as branch | <c-e> custom name]',
             finder = finders.new_table {
                 results = results,
                 entry_maker = function(entry)

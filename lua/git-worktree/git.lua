@@ -170,6 +170,11 @@ function M.create_worktree_job(path, branch, found_branch, upstream, found_upstr
         on_start = function()
             Log.debug(worktree_add_cmd .. ' ' .. table.concat(worktree_add_args, ' '))
         end,
+        on_stderr = function(_, data)
+            if data and data ~= '' then
+                Log.debug('git worktree add: %s', data)
+            end
+        end,
     }
 end
 
